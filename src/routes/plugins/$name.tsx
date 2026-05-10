@@ -424,7 +424,7 @@ export function PluginDetailPage({
                     <>
                       <span className="text-ink-soft opacity-40">·</span>
                       <Link
-                        to="/u/$handle"
+                        to="/p/$handle"
                         params={{ handle: owner.handle }}
                         className="text-[color:var(--accent)] hover:underline"
                       >

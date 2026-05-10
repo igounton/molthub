@@ -163,7 +163,7 @@ export function SoulDetailPage({ slug }: SoulDetailPageProps) {
                     <div className="text-sm text-[color:var(--ink-soft)]">
                       by{" "}
                       <a
-                        href={`/u/${ownerHandle}`}
+                        href={`/p/${ownerHandle}`}
                         className="text-[color:var(--accent)] hover:underline"
                       >
                         @{ownerHandle}

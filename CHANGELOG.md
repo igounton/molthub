@@ -15,6 +15,7 @@
 ### Fixes
 
 - Web: keep the Publishers directory responsive for high-volume publishers by using bounded published-item previews, and abort stale unified-search plugin requests during route changes.
+- Web: point skill, plugin, and soul owner links directly at canonical `/p/:handle` publisher profiles instead of legacy redirect routes.
 - Web: align signed-in header avatar controls across desktop and mobile so the menu trigger keeps consistent sizing, truncation, and dropdown styling (#2124) (thanks @vyctorbrzezowski).
 - Security: add an admin-only moderation hold lift path for false-positive publisher holds, with audited skill restoration that preserves independently hidden skills (#1133) (thanks @Justincredible-tech).
 - Docs/dev: document the local Convex site proxy URL and make worktree setup reject misconfigured local site URLs that break HTTP routes (#2060) (thanks @vyctorbrzezowski).

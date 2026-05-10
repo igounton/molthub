@@ -54,9 +54,9 @@ test("known public skill detail links to owner profile", async ({ page, request 
   await page.goto(`/${ownerHandle}/${slug}`, { waitUntil: "domcontentloaded" });
   const ownerLink = page.locator(".user-handle").first();
 
-  await expect(ownerLink).toHaveAttribute("href", new RegExp(`/u/${ownerHandle}$`));
+  await expect(ownerLink).toHaveAttribute("href", new RegExp(`/p/${ownerHandle}$`));
   await ownerLink.click();
-  await expect(page).toHaveURL(new RegExp(`/u/${ownerHandle}$`));
+  await expect(page).toHaveURL(new RegExp(`/p/${ownerHandle}$`));
   await expect(page.getByRole("heading", { name: "Published" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Stars" })).toBeVisible();
   await expectHealthyPage(page, errors);

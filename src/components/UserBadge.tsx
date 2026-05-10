@@ -29,14 +29,7 @@ export function UserBadge({
     hasOwnProperty(user, "name") && typeof user.name === "string" ? user.name.trim() : undefined;
   const displayName = user?.displayName?.trim() || userName || null;
   const handle = user?.handle ?? fallbackHandle ?? null;
-  const href =
-    user?.handle && hasOwnProperty(user, "kind")
-      ? user.kind === "org"
-        ? `/orgs/${encodeURIComponent(user.handle)}`
-        : `/u/${encodeURIComponent(user.handle)}`
-      : user?.handle
-        ? `/u/${encodeURIComponent(user.handle)}`
-        : null;
+  const href = user?.handle ? `/p/${encodeURIComponent(user.handle)}` : null;
   const label = handle ? `@${handle}` : "user";
   const image = user?.image ?? null;
   const hasUsefulName =
