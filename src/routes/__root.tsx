@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Scripts, useLocation } from "@tanstack/react-router";
 import { Analytics } from "@vercel/analytics/react";
+import { useEffect } from "react";
 import { Toaster } from "sonner";
 import { AppProviders } from "../components/AppProviders";
 import { ClientOnly } from "../components/ClientOnly";
@@ -116,6 +117,14 @@ export const Route = createRootRoute({
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    document.documentElement.dataset.clawhubHydrated = "true";
+  }, []);
+
+  const showAnalytics =
+    typeof window !== "undefined" &&
+    !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+
   return (
     <html lang="en">
       <head>
@@ -148,9 +157,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
               },
             }}
           />
-          <ClientOnly>
-            <Analytics />
-          </ClientOnly>
+          <ClientOnly>{showAnalytics ? <Analytics /> : null}</ClientOnly>
         </AppProviders>
         <Scripts />
       </body>

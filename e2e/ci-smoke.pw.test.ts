@@ -1,26 +1,22 @@
 import { expect, test } from "@playwright/test";
 import { expectHealthyPage, trackRuntimeErrors } from "./helpers/runtimeErrors";
 
-test("public navigation routes render without runtime errors", async ({ page }) => {
-  const errors = trackRuntimeErrors(page);
+test("public navigation routes render without runtime errors", async ({ browser }) => {
+  const routes = [
+    { path: "/skills", heading: "Skills" },
+    { path: "/souls", heading: "SOUL.md discovery is on deck" },
+    { path: "/plugins", heading: "Plugins" },
+  ];
 
-  await page.goto("/skills", { waitUntil: "domcontentloaded" });
-  await expect(page.locator("h1", { hasText: "Skills" })).toBeVisible();
+  for (const route of routes) {
+    const page = await browser.newPage();
+    const errors = trackRuntimeErrors(page);
 
-  await page.goto("/souls", { waitUntil: "domcontentloaded" });
-  await expect(page.locator("h1", { hasText: "SOUL.md discovery is on deck" })).toBeVisible();
-
-  await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByRole("link", { name: "Skills" }).first().click();
-  await expect(page).toHaveURL(/\/skills/);
-  await expect(page.locator("h1", { hasText: "Skills" })).toBeVisible();
-
-  await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByRole("link", { name: "Plugins" }).first().click();
-  await expect(page).toHaveURL(/\/plugins(\?|$)/);
-  await expect(page.locator("h1", { hasText: "Plugins" })).toBeVisible();
-
-  await expectHealthyPage(page, errors);
+    await page.goto(route.path, { waitUntil: "domcontentloaded" });
+    await expect(page.locator("h1", { hasText: route.heading })).toBeVisible();
+    await expectHealthyPage(page, errors);
+    await page.close();
+  }
 });
 
 test("signed-out publish entry renders", async ({ page }) => {

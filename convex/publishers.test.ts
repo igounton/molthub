@@ -109,6 +109,13 @@ const updateProfileHandler = (
   }>
 )._handler;
 
+function indexedRows<T>(rows: T[]) {
+  return {
+    collect: vi.fn(async () => rows),
+    order: vi.fn(() => ({ take: vi.fn(async (limit: number) => rows.slice(0, limit)) })),
+  };
+}
+
 describe("publishers membership controls", () => {
   it("rejects org handles reserved for public routes", async () => {
     const ctx = {
@@ -206,18 +213,14 @@ describe("publishers membership controls", () => {
               };
             }
             if (table === "skills" && indexName === "by_owner_publisher_active_updated") {
-              return {
-                collect: vi.fn(async () =>
-                  skillRows.filter((skill) => skill.ownerPublisherId === fields.ownerPublisherId),
-                ),
-              };
+              return indexedRows(
+                skillRows.filter((skill) => skill.ownerPublisherId === fields.ownerPublisherId),
+              );
             }
             if (table === "packages" && indexName === "by_owner_publisher_active_updated") {
-              return {
-                collect: vi.fn(async () =>
-                  packageRows.filter((pkg) => pkg.ownerPublisherId === fields.ownerPublisherId),
-                ),
-              };
+              return indexedRows(
+                packageRows.filter((pkg) => pkg.ownerPublisherId === fields.ownerPublisherId),
+              );
             }
             throw new Error(`unexpected ${table} index ${indexName}`);
           }),
@@ -291,7 +294,7 @@ describe("publishers membership controls", () => {
               (table === "skills" || table === "packages") &&
               indexName === "by_owner_publisher_active_updated"
             ) {
-              return { collect: vi.fn(async () => []) };
+              return indexedRows([]);
             }
             throw new Error(`unexpected ${table} index ${indexName}`);
           }),
@@ -397,7 +400,7 @@ describe("publishers membership controls", () => {
               (table === "skills" || table === "packages") &&
               indexName === "by_owner_publisher_active_updated"
             ) {
-              return { collect: vi.fn(async () => []) };
+              return indexedRows([]);
             }
             throw new Error(`unexpected ${table} index ${indexName}`);
           }),
@@ -459,7 +462,7 @@ describe("publishers membership controls", () => {
               indexName === "by_owner_publisher_active_updated"
             ) {
               ownerPublisherQueries.push(String(fields.ownerPublisherId));
-              return { collect: vi.fn(async () => []) };
+              return indexedRows([]);
             }
             throw new Error(`unexpected ${table} index ${indexName}`);
           }),
@@ -557,24 +560,22 @@ describe("publishers membership controls", () => {
               };
             }
             if (table === "skills" && indexName === "by_owner_publisher_active_updated") {
-              return { collect: vi.fn(async () => []) };
+              return indexedRows([]);
             }
             if (table === "packages" && indexName === "by_owner_publisher_active_updated") {
-              return {
-                collect: vi.fn(async () => [
-                  {
-                    _id: "packages:plugin",
-                    ownerPublisherId: "publishers:openclaw",
-                    softDeletedAt: undefined,
-                    family: "code-plugin",
-                    name: "@openclaw/example-plugin",
-                    displayName: "Example Plugin",
-                    summary: "Scoped plugin",
-                    stats: { downloads: 7, installs: 3, stars: 1, versions: 1 },
-                    updatedAt: 5,
-                  },
-                ]),
-              };
+              return indexedRows([
+                {
+                  _id: "packages:plugin",
+                  ownerPublisherId: "publishers:openclaw",
+                  softDeletedAt: undefined,
+                  family: "code-plugin",
+                  name: "@openclaw/example-plugin",
+                  displayName: "Example Plugin",
+                  summary: "Scoped plugin",
+                  stats: { downloads: 7, installs: 3, stars: 1, versions: 1 },
+                  updatedAt: 5,
+                },
+              ]);
             }
             throw new Error(`unexpected ${table} index ${indexName}`);
           }),

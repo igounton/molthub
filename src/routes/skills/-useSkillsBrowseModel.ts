@@ -8,6 +8,13 @@ import type { SkillListEntry, SkillSearchEntry } from "./-types";
 
 const pageSize = 25;
 
+function isNavigationAbortError(err: unknown) {
+  if (!(err instanceof Error)) return false;
+  return (
+    err.name === "AbortError" || err.message === "Failed to fetch" || err.message === "Load failed"
+  );
+}
+
 export type SkillsView = "grid" | "list";
 type LegacySkillsView = SkillsView | "cards";
 
@@ -108,7 +115,9 @@ export function useSkillsBrowseModel({
         setListStatus(canAdvance ? "idle" : "done");
       } catch (err) {
         if (generation !== fetchGeneration.current) return;
-        console.error("Failed to fetch skills page:", err);
+        if (!isNavigationAbortError(err)) {
+          console.error("Failed to fetch skills page:", err);
+        }
         // Reset to idle so the user can retry via "Load more"
         setListStatus(cursor ? "idle" : "done");
       }
@@ -118,13 +127,18 @@ export function useSkillsBrowseModel({
 
   // Reset and fetch first page when sort/dir/filters change
   useEffect(() => {
-    if (hasQuery) return;
+    if (hasQuery) {
+      return () => {};
+    }
     fetchGeneration.current += 1;
     const generation = fetchGeneration.current;
     setListResults([]);
     setListCursor(null);
     setListStatus("loading");
     void fetchPage(null, generation);
+    return () => {
+      fetchGeneration.current += 1;
+    };
   }, [hasQuery, fetchPage]);
 
   const isLoadingList = listStatus === "loading";

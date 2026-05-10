@@ -23,6 +23,7 @@ import { readCanonicalStat } from "./lib/skillStats";
 
 const PUBLISHER_HANDLE_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 const MAX_PUBLIC_PUBLISHER_LIST_LIMIT = 500;
+const PUBLISHER_LIST_PREVIEW_LIMIT = 3;
 
 type PublisherListStats = {
   skills: number;
@@ -153,6 +154,29 @@ async function getPublisherPublishedRows(
   return { skills, packages };
 }
 
+async function getPublisherPublishedPreviewRows(
+  ctx: Pick<QueryCtx, "db">,
+  publisherId: Id<"publishers">,
+): Promise<PublisherPublishedRows> {
+  const [skills, packages] = await Promise.all([
+    ctx.db
+      .query("skills")
+      .withIndex("by_owner_publisher_active_updated", (q) =>
+        q.eq("ownerPublisherId", publisherId).eq("softDeletedAt", undefined),
+      )
+      .order("desc")
+      .take(PUBLISHER_LIST_PREVIEW_LIMIT),
+    ctx.db
+      .query("packages")
+      .withIndex("by_owner_publisher_active_updated", (q) =>
+        q.eq("ownerPublisherId", publisherId).eq("softDeletedAt", undefined),
+      )
+      .order("desc")
+      .take(PUBLISHER_LIST_PREVIEW_LIMIT),
+  ]);
+  return { skills, packages };
+}
+
 function getIndexedPublisherStatsFromRows(rows: PublisherPublishedRows): PublisherListStats {
   const stats = emptyPublisherListStats();
 
@@ -273,12 +297,14 @@ async function toPublisherListItem(
     publishedRows ??= await getPublisherPublishedRows(ctx, publisher._id);
     return publishedRows;
   };
+  const getPreviewRows = async () =>
+    publishedRows ?? (await getPublisherPublishedPreviewRows(ctx, publisher._id));
   const stats =
     !options.forceComputedStats && hasPublisherStats(publisher)
       ? getPublisherDenormalizedStats(publisher)
       : getIndexedPublisherStatsFromRows(await getRows());
   const publishedItems = options.includePublishedItems
-    ? getPublisherPublishedItems(await getRows())
+    ? getPublisherPublishedItems(await getPreviewRows())
     : [];
   const affiliations =
     options.includeAffiliations && publisher.kind === "user" && publisher.linkedUserId

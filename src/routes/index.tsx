@@ -492,7 +492,7 @@ function SkillsHome() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            <button type="submit" className="home-v2-search-go">
+            <button type="submit" className="home-v2-search-go" aria-label="Search">
               <span className="home-v2-search-go-label">Search</span> <ArrowRight size={16} />
             </button>
           </form>

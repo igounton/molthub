@@ -227,7 +227,7 @@ async function getForwardedHeaders() {
   }
 }
 
-async function packageFetch(url: URL, accept: string) {
+async function packageFetch(url: URL, accept: string, signal?: AbortSignal) {
   const forwarded = await getForwardedHeaders();
   const isSameOrigin = typeof window !== "undefined" && url.origin === window.location.origin;
   return await fetch(url.toString(), {
@@ -241,6 +241,7 @@ async function packageFetch(url: URL, accept: string) {
       Accept: accept,
       ...forwarded,
     },
+    signal,
   });
 }
 
@@ -283,8 +284,8 @@ function normalizePackageApiErrorBody(status: number, body: string) {
   return body || `Request failed with status ${status}`;
 }
 
-async function fetchJson<T>(url: URL): Promise<T> {
-  const response = await packageFetch(url, "application/json");
+async function fetchJson<T>(url: URL, signal?: AbortSignal): Promise<T> {
+  const response = await packageFetch(url, "application/json", signal);
   if (!response.ok) throw await createPackageApiError(response);
   return (await response.json()) as T;
 }
@@ -298,6 +299,7 @@ export async function fetchPackages(params: {
   executesCode?: boolean;
   capabilityTag?: string;
   limit?: number;
+  signal?: AbortSignal;
 }) {
   if (params.q?.trim()) {
     const url = await packageApiUrl(`${ApiRoutes.packages}/search`);
@@ -312,7 +314,10 @@ export async function fetchPackages(params: {
       url.searchParams.set("executesCode", String(params.executesCode));
     }
     if (params.capabilityTag) url.searchParams.set("capabilityTag", params.capabilityTag);
-    return await fetchJson<{ results: Array<{ score: number; package: PackageListItem }> }>(url);
+    return await fetchJson<{ results: Array<{ score: number; package: PackageListItem }> }>(
+      url,
+      params.signal,
+    );
   }
 
   const route =
@@ -333,7 +338,10 @@ export async function fetchPackages(params: {
     url.searchParams.set("executesCode", String(params.executesCode));
   }
   if (params.capabilityTag) url.searchParams.set("capabilityTag", params.capabilityTag);
-  return await fetchJson<{ items: PackageListItem[]; nextCursor: string | null }>(url);
+  return await fetchJson<{ items: PackageListItem[]; nextCursor: string | null }>(
+    url,
+    params.signal,
+  );
 }
 
 export async function fetchPluginCatalog(params: {
@@ -344,6 +352,7 @@ export async function fetchPluginCatalog(params: {
   featured?: boolean;
   executesCode?: boolean;
   limit?: number;
+  signal?: AbortSignal;
 }): Promise<PluginCatalogResult> {
   if (params.family) {
     const response = await fetchPackages({
@@ -354,6 +363,7 @@ export async function fetchPluginCatalog(params: {
       featured: params.featured,
       executesCode: params.executesCode,
       limit: params.limit,
+      signal: params.signal,
     });
     if (hasOwnProperty(response, "results") && Array.isArray(response.results)) {
       return {
@@ -382,7 +392,7 @@ export async function fetchPluginCatalog(params: {
     }
     const response = await fetchJson<{
       results?: Array<{ score: number; package: PackageListItem }>;
-    }>(url);
+    }>(url, params.signal);
     return {
       items: (response?.results ?? [])
         .map((entry) => entry?.package)
@@ -401,7 +411,7 @@ export async function fetchPluginCatalog(params: {
   if (typeof params.executesCode === "boolean") {
     url.searchParams.set("executesCode", String(params.executesCode));
   }
-  const result = await fetchJson<PluginCatalogResult>(url);
+  const result = await fetchJson<PluginCatalogResult>(url, params.signal);
   return {
     items: result?.items ?? [],
     nextCursor: result?.nextCursor ?? null,

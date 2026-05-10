@@ -80,6 +80,7 @@ export function useUnifiedSearch(
 
     requestRef.current += 1;
     const requestId = requestRef.current;
+    const controller = new AbortController();
     setIsSearching(true);
 
     const handle = window.setTimeout(() => {
@@ -97,7 +98,11 @@ export function useUnifiedSearch(
           }
 
           if (activeType === "all" || activeType === "plugins") {
-            promises[1] = fetchPluginCatalog({ q: trimmed, limit: pluginLimit });
+            promises[1] = fetchPluginCatalog({
+              q: trimmed,
+              limit: pluginLimit,
+              signal: controller.signal,
+            });
           }
 
           const settled = await Promise.allSettled(promises.map((p) => p ?? Promise.resolve(null)));
@@ -159,7 +164,11 @@ export function useUnifiedSearch(
       })();
     }, debounceMs);
 
-    return () => window.clearTimeout(handle);
+    return () => {
+      requestRef.current += 1;
+      controller.abort();
+      window.clearTimeout(handle);
+    };
   }, [
     query,
     activeType,

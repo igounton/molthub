@@ -8799,6 +8799,10 @@ form.summary-edit-form .summary-textarea:focus {
     height: 44px;
   }
 
+  .browse-search-input {
+    font-size: 1rem;
+  }
+
   .browse-results-toolbar {
     flex-wrap: wrap;
     gap: 8px;

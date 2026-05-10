@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { expectHealthyPage, trackRuntimeErrors } from "./helpers/runtimeErrors";
+import { expectHealthyPage, trackRuntimeErrors, waitForHydration } from "./helpers/runtimeErrors";
 
 const navLabels = ["Skills", "Plugins"];
 
@@ -34,6 +34,7 @@ test("souls loads without error", async ({ page }) => {
 test("header menu routes render", async ({ page }) => {
   const errors = trackRuntimeErrors(page);
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  await waitForHydration(page);
 
   for (const label of navLabels) {
     const link = await headerLink(page, label);

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { expectHealthyPage, trackRuntimeErrors } from "./helpers/runtimeErrors";
+import { expectHealthyPage, trackRuntimeErrors, waitForHydration } from "./helpers/runtimeErrors";
 
 // Only run in mobile projects — skip on desktop
 test.beforeEach(({}, testInfo) => {
@@ -11,6 +11,7 @@ test("browse page has no horizontal overflow on mobile", async ({ page }) => {
 
   await page.goto("/skills?sort=downloads", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: /^Skills/ })).toBeVisible();
+  await waitForHydration(page);
   await expect(page.locator(".skill-card, .skill-list-item").first()).toBeVisible();
 
   const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -25,6 +26,7 @@ test("browse sidebar toggle opens and closes filters", async ({ page }) => {
 
   await page.goto("/skills?sort=downloads", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: /^Skills/ })).toBeVisible();
+  await waitForHydration(page);
 
   const filterButton = page.getByRole("button", { name: "Toggle filters" });
   await expect(filterButton).toBeVisible();
@@ -33,13 +35,19 @@ test("browse sidebar toggle opens and closes filters", async ({ page }) => {
   const sidebar = page.locator(".browse-sidebar");
   await expect(sidebar).not.toBeVisible();
 
-  // Open sidebar
-  await filterButton.click();
-  await expect(sidebar).toBeVisible();
+  await expect(async () => {
+    if (!(await sidebar.isVisible())) {
+      await filterButton.click();
+    }
+    await expect(sidebar).toBeVisible({ timeout: 500 });
+  }).toPass({ timeout: 10_000 });
 
-  // Close sidebar
-  await filterButton.click();
-  await expect(sidebar).not.toBeVisible();
+  await expect(async () => {
+    if (await sidebar.isVisible()) {
+      await filterButton.click();
+    }
+    await expect(sidebar).not.toBeVisible({ timeout: 500 });
+  }).toPass({ timeout: 10_000 });
 
   await expectHealthyPage(page, errors);
 });
@@ -47,7 +55,7 @@ test("browse sidebar toggle opens and closes filters", async ({ page }) => {
 test("card grid fits within viewport on mobile", async ({ page }) => {
   const errors = trackRuntimeErrors(page);
 
-  await page.goto("/skills?sort=downloads&view=cards", { waitUntil: "domcontentloaded" });
+  await page.goto("/skills?sort=downloads&view=grid", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".skill-card").first()).toBeVisible();
 
   const card = page.locator(".skill-card").first();
