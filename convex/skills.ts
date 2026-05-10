@@ -5027,6 +5027,93 @@ export const getActiveSkillBatchForLlmBackfillInternal = internalQuery({
   },
 });
 
+const suspiciousSkillLlmRescanBucketValidator = v.union(
+  v.literal("all"),
+  v.literal("llm-only"),
+  v.literal("vt-only"),
+  v.literal("both"),
+);
+
+function skillHasReasonCode(
+  skill: Pick<Doc<"skills">, "moderationReason" | "moderationReasonCodes">,
+  code: string,
+) {
+  return (skill.moderationReasonCodes ?? []).includes(code);
+}
+
+function skillHasScannerSuspiciousReason(
+  skill: Pick<Doc<"skills">, "moderationReason" | "moderationReasonCodes">,
+  scanner: "llm" | "vt",
+) {
+  return (
+    skillHasReasonCode(skill, `suspicious.${scanner}_suspicious`) ||
+    skill.moderationReason === `scanner.${scanner}.suspicious`
+  );
+}
+
+/**
+ * Targeted LLM rescan batches for suspicious latest skill versions.
+ * Uses the suspicious index, then filters bucket membership in-page.
+ */
+export const getSuspiciousSkillBatchForLlmRescanInternal = internalQuery({
+  args: {
+    bucket: suspiciousSkillLlmRescanBucketValidator,
+    cursor: v.optional(v.union(v.string(), v.null())),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const batchSize = clampInt(args.batchSize ?? 100, 1, 200);
+    const { page, continueCursor, isDone } = await ctx.db
+      .query("skills")
+      .withIndex("by_nonsuspicious_updated", (q) =>
+        q.eq("softDeletedAt", undefined).eq("isSuspicious", true),
+      )
+      .order("asc")
+      .paginate({ cursor: args.cursor ?? null, numItems: batchSize });
+
+    const skills: Array<{
+      skillId: Id<"skills">;
+      versionId: Id<"skillVersions">;
+      slug: string;
+      reasonCodes: string[];
+    }> = [];
+
+    for (const skill of page) {
+      if (!skill.latestVersionId) continue;
+      if (skill.moderationVerdict === "malicious") continue;
+      if ((skill.moderationReasonCodes ?? []).some((code) => code.startsWith("malicious."))) {
+        continue;
+      }
+      if ((skill.moderationFlags ?? []).includes("blocked.malware")) continue;
+
+      const hasLlmSuspicious = skillHasScannerSuspiciousReason(skill, "llm");
+      const hasVtSuspicious = skillHasScannerSuspiciousReason(skill, "vt");
+      const matches =
+        args.bucket === "all" ||
+        (args.bucket === "llm-only" && hasLlmSuspicious && !hasVtSuspicious) ||
+        (args.bucket === "vt-only" && hasVtSuspicious && !hasLlmSuspicious) ||
+        (args.bucket === "both" && hasLlmSuspicious && hasVtSuspicious);
+      if (!matches) continue;
+
+      const version = await ctx.db.get(skill.latestVersionId);
+      if (!version) continue;
+      skills.push({
+        skillId: skill._id,
+        versionId: version._id,
+        slug: skill.slug,
+        reasonCodes: skill.moderationReasonCodes ?? [],
+      });
+    }
+
+    return {
+      skills,
+      examined: page.length,
+      continueCursor,
+      isDone,
+    };
+  },
+});
+
 /**
  * Get active latest skill versions whose static scan is missing or uses an older engine version.
  * Used to backfill new static rules onto already-published skills.

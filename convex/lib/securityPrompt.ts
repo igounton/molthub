@@ -271,7 +271,7 @@ The skill has already been scanned by a regex-based pattern detector. Those find
 
 - If scan findings exist, incorporate them into your reasoning but evaluate whether they make sense in context. A "deployment" skill with child_process exec is expected. A "markdown-formatter" with child_process exec is not.
 - If no scan findings exist, that does NOT mean the skill is safe. Many skills are instruction-only with no code files — the regex scanner had nothing to analyze. For these skills, your assessment of the SKILL.md instructions is the primary security signal.
-- Never downgrade a scan finding's severity. You can provide context for why a finding may be expected, but always surface it.
+- Static findings are advisory signal. You can provide context for why a finding is expected, and purpose-aligned static suspicious findings alone should not make the final verdict suspicious.
 
 ## Verdict definitions
 
@@ -283,10 +283,10 @@ The skill has already been scanned by a regex-based pattern detector. Those find
 
 - The bar for "malicious" is high. It requires incoherence across multiple dimensions that cannot be explained by poor engineering or over-broad requirements. A single suspicious pattern is not enough. "Suspicious" exists precisely for the cases where you can't tell.
 - "Benign" does not mean "safe." It means the skill is internally coherent. A coherent skill can still have vulnerabilities. "Benign" answers "does this skill appear to be what it says it is" — not "is this skill bug-free."
-- When in doubt between benign and suspicious, choose suspicious. When in doubt between suspicious and malicious, choose suspicious. The middle state is where ambiguity lives — use it.
+- When evidence only supports coherent, purpose-aligned notes, choose benign. When there is concrete artifact-backed ambiguity, overbreadth, or purpose mismatch, choose suspicious. When in doubt between suspicious and malicious, choose suspicious.
 - NEVER classify something as "malicious" solely because it uses shell execution, network calls, or file I/O. These are normal programming operations. The question is always whether they are *coherent with the skill's purpose*.
 - NEVER classify something as "benign" solely because it has no scan findings. Absence of regex matches is not evidence of safety — especially for instruction-only skills with no code files.
-- DO distinguish between unintentional vulnerabilities (sloppy code, missing input validation) and intentional misdirection (skill claims one purpose but its instructions/requirements reveal a different one). Vulnerabilities are "suspicious." Misdirection is "malicious."
+- DO distinguish between unintentional vulnerabilities (sloppy code, missing input validation) and intentional misdirection (skill claims one purpose but its instructions/requirements reveal a different one). Vulnerabilities can be noted or suspicious depending on impact and exploitability. Misdirection is "malicious."
 - DO explain your reasoning. A user who doesn't know what "environment variable exfiltration" means needs you to say "this skill asks for your AWS credentials but nothing in its description suggests it needs cloud access."
 - When confidence is "low", say so explicitly and explain what additional information would change your assessment.
 
@@ -344,7 +344,7 @@ You review only the artifacts provided in the user message: SKILL.md, metadata, 
    Ask whether the skill's purpose, requested authority, install path, runtime instructions, persistence, data flows, and user impact fit together. Prefer benign for coherent, disclosed, purpose-aligned behavior. A coherent skill can still need user guidance, but it should remain benign when the sensitive behavior is expected, disclosed, and proportionate.
 
 2. Evidence threshold
-   The internal verdict value "suspicious" is the user-facing Review bucket, not an accusation of malicious intent. Use it for high-impact access, sensitive data access, credential/session/profile use, mutation authority, broad local indexing, persistence, or other capabilities that a human should read carefully before installing. Reserve malicious for artifact-backed deception, purpose incompatibility, exfiltration, destructive actions, or clearly unsafe behavior.
+   The internal verdict value "suspicious" is the user-facing Review bucket, not an accusation of malicious intent. Use it when high-impact access, sensitive data access, credential/session/profile use, mutation authority, broad local indexing, persistence, or similar capabilities also show material concern: unclear scoping, missing user control, purpose mismatch, hidden behavior, or under-disclosure. Reserve malicious for artifact-backed deception, purpose incompatibility, exfiltration, destructive actions, or clearly unsafe behavior.
    Before using the Review bucket, identify concrete artifact evidence showing purpose mismatch, hidden behavior, overbroad authority, deceptive framing, unsafe automatic execution, unbounded persistence, unexpected credential/data handling, or high-impact actions without clear user control. Do not escalate from category fit alone.
    Purpose-aligned behavior can still be a Review concern when it grants high-impact authority without clear scoping, reversibility, containment, or user-directed control. Treat these as material concern candidates: modifying or deleting financial/business/account data, posting or moderating public content, bulk-changing installed skills or agent behavior, indexing broad local/private content for reuse, spawning background agents or long-running workers, reading or using local auth/session/profile stores, or using raw API/escape-hatch commands that bypass safer scoped workflows.
 
@@ -887,6 +887,40 @@ function parseRiskSummary(value: unknown): LlmRiskSummary | null | undefined {
   return summary;
 }
 
+function hasConcernDimension(dimensions: LlmEvalDimension[]) {
+  return dimensions.some((dimension) => dimension.rating.trim().toLowerCase() === "concern");
+}
+
+function hasConcernFinding(findings: LlmAgenticRiskFinding[] | undefined) {
+  return findings?.some((finding) => finding.status === "concern") ?? false;
+}
+
+function hasConcernSummary(summary: LlmRiskSummary | undefined) {
+  if (!summary) return false;
+  return Object.values(summary).some((bucket) => bucket.status === "concern");
+}
+
+function normalizeParsedLlmEvalResponse(result: LlmEvalResponse): LlmEvalResponse {
+  if (result.verdict !== "suspicious") return result;
+
+  const hasStructuredAgenticFields =
+    result.agenticRiskFindings !== undefined || result.riskSummary !== undefined;
+  if (!hasStructuredAgenticFields) return result;
+
+  if (
+    hasConcernDimension(result.dimensions) ||
+    hasConcernFinding(result.agenticRiskFindings) ||
+    hasConcernSummary(result.riskSummary)
+  ) {
+    return result;
+  }
+
+  return {
+    ...result,
+    verdict: "benign",
+  };
+}
+
 export function parseLlmEvalResponse(raw: string): LlmEvalResponse | null {
   // Strip markdown code fences if present
   let text = raw.trim();
@@ -962,7 +996,7 @@ export function parseLlmEvalResponse(raw: string): LlmEvalResponse | null {
   const riskSummary = parseRiskSummary(obj.risk_summary ?? obj.riskSummary);
   if (riskSummary === null) return null;
 
-  return {
+  return normalizeParsedLlmEvalResponse({
     verdict: verdict as LlmEvalResponse["verdict"],
     confidence: confidence as LlmEvalResponse["confidence"],
     summary,
@@ -971,5 +1005,5 @@ export function parseLlmEvalResponse(raw: string): LlmEvalResponse | null {
     findings,
     agenticRiskFindings: agenticRiskFindings ?? undefined,
     riskSummary: riskSummary ?? undefined,
-  };
+  });
 }

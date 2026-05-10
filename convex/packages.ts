@@ -4810,6 +4810,53 @@ export const updateReleaseLlmAnalysisInternal = internalMutation({
   },
 });
 
+export const getSuspiciousPluginReleaseBatchForLlmRescanInternal = internalQuery({
+  args: {
+    cursor: v.optional(v.union(v.string(), v.null())),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const batchSize = Math.max(1, Math.min(Math.floor(args.batchSize ?? 100), 200));
+    const { page, continueCursor, isDone } = await ctx.db
+      .query("packages")
+      .withIndex("by_active_updated", (q) => q.eq("softDeletedAt", undefined))
+      .order("asc")
+      .paginate({ cursor: args.cursor ?? null, numItems: batchSize });
+
+    const releases: Array<{
+      packageId: Id<"packages">;
+      releaseId: Id<"packageReleases">;
+      name: string;
+      family: PackageFamily;
+    }> = [];
+
+    for (const pkg of page) {
+      if (pkg.family === "skill") continue;
+      if (pkg.scanStatus !== "suspicious") continue;
+      if (!pkg.latestReleaseId) continue;
+      const release = await ctx.db.get(pkg.latestReleaseId);
+      if (!isReleaseActive(release)) continue;
+      if (release.manualModeration?.state === "quarantined") continue;
+      if (release.manualModeration?.state === "revoked") continue;
+      if (resolvePackageReleaseScanStatus(release) !== "suspicious") continue;
+
+      releases.push({
+        packageId: pkg._id,
+        releaseId: release._id,
+        name: pkg.normalizedName,
+        family: pkg.family,
+      });
+    }
+
+    return {
+      releases,
+      examined: page.length,
+      continueCursor,
+      isDone,
+    };
+  },
+});
+
 export const backfillLatestPackageScanStatusInternal = internalMutation({
   args: {
     cursor: v.optional(v.string()),

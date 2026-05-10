@@ -79,6 +79,11 @@ See also: [acceptable-usage.md](./acceptable-usage.md) for the marketplace polic
 - Static suspicious findings are advisory evidence only. They no longer produce
   an aggregate suspicious verdict or public package scan status without VT/LLM
   corroboration. Static malicious findings still block immediately.
+- ClawScan LLM verdicts treat purpose-aligned notes as user guidance, not a
+  suspicious verdict. A suspicious LLM verdict must include at least one
+  structured material concern or a compounding concern pattern.
+- Operators can schedule targeted LLM rescans for suspicious skills by bucket
+  (`all`, `llm-only`, `vt-only`, `both`) and for suspicious plugin releases.
 - Package/plugin scan backfills now also recompute deterministic static scan results for older releases,
   so legacy plugin versions can surface OpenClaw scan findings without republishing.
 - ClawPack package releases keep static/LLM scan inputs intentionally metadata-only for now:

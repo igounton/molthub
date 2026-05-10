@@ -19,7 +19,6 @@ import {
   getLlmEvalModel,
   getLlmEvalReasoningEffort,
   getLlmEvalServiceTier,
-  LEGACY_SECURITY_EVALUATOR_SYSTEM_PROMPT,
   LLM_EVAL_MAX_OUTPUT_TOKENS,
   parseLlmEvalResponse,
   SKILL_SECURITY_EVALUATOR_SYSTEM_PROMPT,
@@ -30,6 +29,16 @@ const internalRefs = internal as unknown as {
     getReleaseByIdInternal: unknown;
     getPackageByIdInternal: unknown;
     updateReleaseLlmAnalysisInternal: unknown;
+    getSuspiciousPluginReleaseBatchForLlmRescanInternal: unknown;
+  };
+  skills: {
+    getSuspiciousSkillBatchForLlmRescanInternal: unknown;
+  };
+  llmEval: {
+    evaluateWithLlm: unknown;
+    evaluatePackageReleaseWithLlm: unknown;
+    scheduleSuspiciousSkillLlmRescanInternal: unknown;
+    scheduleSuspiciousPluginLlmRescanInternal: unknown;
   };
 };
 
@@ -58,6 +67,15 @@ async function runMutationRef<T>(
   args: unknown,
 ): Promise<T> {
   return (await ctx.runMutation(ref as never, args as never)) as T;
+}
+
+async function runAfterRef(
+  ctx: { scheduler: { runAfter: (delayMs: number, ref: never, args: never) => Promise<unknown> } },
+  delayMs: number,
+  ref: unknown,
+  args: unknown,
+): Promise<void> {
+  await ctx.scheduler.runAfter(delayMs, ref as never, args as never);
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -500,6 +518,8 @@ export const evaluatePackageReleaseWithLlm = internalAction({
       skillMdContent: readmeContent,
       fileContents,
       injectionSignals,
+      staticScan: release.staticScan,
+      capabilityTags: pkg.capabilityTags,
     };
 
     const userMessage = assembleEvalUserMessage(evalCtx);
@@ -509,7 +529,7 @@ export const evaluatePackageReleaseWithLlm = internalAction({
       const body = JSON.stringify({
         model,
         service_tier: serviceTier,
-        instructions: LEGACY_SECURITY_EVALUATOR_SYSTEM_PROMPT,
+        instructions: SKILL_SECURITY_EVALUATOR_SYSTEM_PROMPT,
         input: userMessage,
         reasoning: {
           effort: reasoningEffort,
@@ -776,6 +796,282 @@ export const backfillLlmEval: ReturnType<typeof internalAction> = internalAction
     return result;
   },
 });
+
+const suspiciousSkillLlmRescanBucketValidator = v.union(
+  v.literal("all"),
+  v.literal("llm-only"),
+  v.literal("vt-only"),
+  v.literal("both"),
+);
+
+type SuspiciousSkillLlmRescanBucket = "all" | "llm-only" | "vt-only" | "both";
+
+type SuspiciousSkillLlmRescanBatch = {
+  skills: Array<{
+    skillId: Id<"skills">;
+    versionId: Id<"skillVersions">;
+    slug: string;
+    reasonCodes: string[];
+  }>;
+  examined: number;
+  continueCursor: string | null;
+  isDone: boolean;
+};
+
+export const scheduleSuspiciousSkillLlmRescanInternal: ReturnType<typeof internalAction> =
+  internalAction({
+    args: {
+      bucket: suspiciousSkillLlmRescanBucketValidator,
+      cursor: v.optional(v.union(v.string(), v.null())),
+      batchSize: v.optional(v.number()),
+      pageDelayMs: v.optional(v.number()),
+      evalDelayStepMs: v.optional(v.number()),
+      dryRun: v.optional(v.boolean()),
+      maxToSchedule: v.optional(v.number()),
+      moderationMode: llmEvalModerationModeValidator,
+      accExamined: v.optional(v.number()),
+      accScheduled: v.optional(v.number()),
+      accSkipped: v.optional(v.number()),
+      startTime: v.optional(v.number()),
+    },
+    handler: async (ctx, args) => {
+      const dryRun = args.dryRun ?? false;
+      if (!dryRun && !process.env.OPENAI_API_KEY) {
+        return { error: "OPENAI_API_KEY not configured" };
+      }
+
+      const batchSize = Math.max(1, Math.min(Math.floor(args.batchSize ?? 100), 200));
+      const pageDelayMs = Math.max(0, Math.floor(args.pageDelayMs ?? 1_000));
+      const evalDelayStepMs = Math.max(0, Math.floor(args.evalDelayStepMs ?? 250));
+      const moderationMode: LlmEvalModerationMode = args.moderationMode ?? "normal";
+      const bucket: SuspiciousSkillLlmRescanBucket = args.bucket;
+      const startTime = args.startTime ?? Date.now();
+      const maxToSchedule =
+        args.maxToSchedule === undefined ? undefined : Math.max(0, Math.floor(args.maxToSchedule));
+      let accExamined = args.accExamined ?? 0;
+      let accScheduled = args.accScheduled ?? 0;
+      let accSkipped = args.accSkipped ?? 0;
+
+      const remaining =
+        maxToSchedule === undefined ? undefined : Math.max(0, maxToSchedule - accScheduled);
+      if (remaining === 0) {
+        return {
+          status: "limit_reached",
+          bucket,
+          examined: accExamined,
+          scheduled: accScheduled,
+          skipped: accSkipped,
+          cursor: args.cursor ?? null,
+        };
+      }
+
+      const batch: SuspiciousSkillLlmRescanBatch = await runQueryRef(
+        ctx,
+        internalRefs.skills.getSuspiciousSkillBatchForLlmRescanInternal,
+        {
+          bucket,
+          cursor: args.cursor ?? null,
+          batchSize,
+        },
+      );
+
+      accExamined += batch.examined;
+      const scheduleLimit = remaining ?? Number.POSITIVE_INFINITY;
+      let scheduledThisPage = 0;
+      for (const skill of batch.skills) {
+        if (scheduledThisPage >= scheduleLimit) {
+          accSkipped += batch.skills.length - scheduledThisPage;
+          break;
+        }
+
+        if (!dryRun) {
+          await runAfterRef(
+            ctx,
+            (accScheduled + scheduledThisPage) * evalDelayStepMs,
+            internalRefs.llmEval.evaluateWithLlm,
+            {
+              versionId: skill.versionId,
+              moderationMode,
+            },
+          );
+        }
+        scheduledThisPage++;
+      }
+      accScheduled += scheduledThisPage;
+
+      const hitLimit = maxToSchedule !== undefined && accScheduled >= maxToSchedule;
+      if (!batch.isDone && !dryRun && !hitLimit) {
+        await runAfterRef(
+          ctx,
+          pageDelayMs,
+          internalRefs.llmEval.scheduleSuspiciousSkillLlmRescanInternal,
+          {
+            bucket,
+            cursor: batch.continueCursor,
+            batchSize,
+            pageDelayMs,
+            evalDelayStepMs,
+            moderationMode,
+            ...(maxToSchedule !== undefined ? { maxToSchedule } : {}),
+            accExamined,
+            accScheduled,
+            accSkipped,
+            startTime,
+          },
+        );
+      }
+
+      if (dryRun || hitLimit || batch.isDone) {
+        return {
+          status: dryRun ? "dry_run" : hitLimit ? "limit_reached" : "complete",
+          bucket,
+          examined: accExamined,
+          scheduled: accScheduled,
+          skipped: accSkipped,
+          cursor: batch.continueCursor,
+          done: batch.isDone,
+          durationMs: Date.now() - startTime,
+        };
+      }
+
+      return {
+        status: "continuing",
+        bucket,
+        examined: accExamined,
+        scheduled: accScheduled,
+        skipped: accSkipped,
+        cursor: batch.continueCursor,
+      };
+    },
+  });
+
+type SuspiciousPluginLlmRescanBatch = {
+  releases: Array<{
+    packageId: Id<"packages">;
+    releaseId: Id<"packageReleases">;
+    name: string;
+    family: string;
+  }>;
+  examined: number;
+  continueCursor: string | null;
+  isDone: boolean;
+};
+
+export const scheduleSuspiciousPluginLlmRescanInternal: ReturnType<typeof internalAction> =
+  internalAction({
+    args: {
+      cursor: v.optional(v.union(v.string(), v.null())),
+      batchSize: v.optional(v.number()),
+      pageDelayMs: v.optional(v.number()),
+      evalDelayStepMs: v.optional(v.number()),
+      dryRun: v.optional(v.boolean()),
+      maxToSchedule: v.optional(v.number()),
+      accExamined: v.optional(v.number()),
+      accScheduled: v.optional(v.number()),
+      accSkipped: v.optional(v.number()),
+      startTime: v.optional(v.number()),
+    },
+    handler: async (ctx, args) => {
+      const dryRun = args.dryRun ?? false;
+      if (!dryRun && !process.env.OPENAI_API_KEY) {
+        return { error: "OPENAI_API_KEY not configured" };
+      }
+
+      const batchSize = Math.max(1, Math.min(Math.floor(args.batchSize ?? 100), 200));
+      const pageDelayMs = Math.max(0, Math.floor(args.pageDelayMs ?? 1_000));
+      const evalDelayStepMs = Math.max(0, Math.floor(args.evalDelayStepMs ?? 250));
+      const startTime = args.startTime ?? Date.now();
+      const maxToSchedule =
+        args.maxToSchedule === undefined ? undefined : Math.max(0, Math.floor(args.maxToSchedule));
+      let accExamined = args.accExamined ?? 0;
+      let accScheduled = args.accScheduled ?? 0;
+      let accSkipped = args.accSkipped ?? 0;
+
+      const remaining =
+        maxToSchedule === undefined ? undefined : Math.max(0, maxToSchedule - accScheduled);
+      if (remaining === 0) {
+        return {
+          status: "limit_reached",
+          examined: accExamined,
+          scheduled: accScheduled,
+          skipped: accSkipped,
+          cursor: args.cursor ?? null,
+        };
+      }
+
+      const batch: SuspiciousPluginLlmRescanBatch = await runQueryRef(
+        ctx,
+        internalRefs.packages.getSuspiciousPluginReleaseBatchForLlmRescanInternal,
+        {
+          cursor: args.cursor ?? null,
+          batchSize,
+        },
+      );
+
+      accExamined += batch.examined;
+      const scheduleLimit = remaining ?? Number.POSITIVE_INFINITY;
+      let scheduledThisPage = 0;
+      for (const release of batch.releases) {
+        if (scheduledThisPage >= scheduleLimit) {
+          accSkipped += batch.releases.length - scheduledThisPage;
+          break;
+        }
+
+        if (!dryRun) {
+          await runAfterRef(
+            ctx,
+            (accScheduled + scheduledThisPage) * evalDelayStepMs,
+            internalRefs.llmEval.evaluatePackageReleaseWithLlm,
+            {
+              releaseId: release.releaseId,
+            },
+          );
+        }
+        scheduledThisPage++;
+      }
+      accScheduled += scheduledThisPage;
+
+      const hitLimit = maxToSchedule !== undefined && accScheduled >= maxToSchedule;
+      if (!batch.isDone && !dryRun && !hitLimit) {
+        await runAfterRef(
+          ctx,
+          pageDelayMs,
+          internalRefs.llmEval.scheduleSuspiciousPluginLlmRescanInternal,
+          {
+            cursor: batch.continueCursor,
+            batchSize,
+            pageDelayMs,
+            evalDelayStepMs,
+            ...(maxToSchedule !== undefined ? { maxToSchedule } : {}),
+            accExamined,
+            accScheduled,
+            accSkipped,
+            startTime,
+          },
+        );
+      }
+
+      if (dryRun || hitLimit || batch.isDone) {
+        return {
+          status: dryRun ? "dry_run" : hitLimit ? "limit_reached" : "complete",
+          examined: accExamined,
+          scheduled: accScheduled,
+          skipped: accSkipped,
+          cursor: batch.continueCursor,
+          done: batch.isDone,
+          durationMs: Date.now() - startTime,
+        };
+      }
+
+      return {
+        status: "continuing",
+        examined: accExamined,
+        scheduled: accScheduled,
+        skipped: accSkipped,
+        cursor: batch.continueCursor,
+      };
+    },
+  });
 
 export const evaluateCommentForScam = internalAction({
   args: {
