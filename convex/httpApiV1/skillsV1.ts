@@ -1132,8 +1132,10 @@ async function handleTransferRequest(
   try {
     const publisher = (await ctx.runQuery(internal.publishers.getByHandleInternal, {
       handle: toHandleRaw,
-    })) as { kind?: "user" | "org"; handle?: string } | null;
-    if (toOwnerRaw || publisher?.kind === "org") {
+    })) as { kind?: "user" | "org"; handle?: string; linkedUserId?: Id<"users"> } | null;
+    const isActorPersonalPublisher =
+      publisher?.kind === "user" && publisher.linkedUserId === transferContext.userId;
+    if (toOwnerRaw || publisher?.kind === "org" || isActorPersonalPublisher) {
       const result = await ctx.runMutation(internal.skills.transferSkillOwnerForUserInternal, {
         actorUserId: transferContext.userId,
         slug: transferContext.skill.slug,
