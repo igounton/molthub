@@ -13,6 +13,9 @@ const DEFAULT_CANCEL_SCAN_LIMIT = 1000;
 const DEFAULT_CANCEL_DELETE_LIMIT = 500;
 const MAX_CANCEL_SCAN_LIMIT = 5000;
 const CANCEL_SAMPLE_LIMIT = 20;
+const MAX_STORED_SKILLSPECTOR_ISSUES = 25;
+const MAX_STORED_SKILLSPECTOR_TEXT_CHARS = 2_000;
+const MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS = 512;
 
 const finalLlmAnalysisStatuses = new Set(["clean", "suspicious", "malicious"]);
 const artifactBackedLlmAnalysisStatuses = new Set(["clean", "benign", "suspicious", "malicious"]);
@@ -38,6 +41,34 @@ type JobTarget = {
 type ExistingLlmAnalysis = {
   status?: string;
   verdict?: string;
+};
+
+type SkillSpectorIssueForStorage = {
+  issueId: string;
+  category?: string;
+  pattern?: string;
+  severity: string;
+  confidence?: number;
+  file?: string;
+  startLine?: number;
+  endLine?: number;
+  explanation: string;
+  remediation?: string;
+  finding?: string;
+  codeSnippet?: string;
+};
+
+type SkillSpectorAnalysisForStorage = {
+  status: string;
+  score?: number;
+  severity?: string;
+  recommendation?: string;
+  issueCount: number;
+  issues: SkillSpectorIssueForStorage[];
+  scannerVersion?: string;
+  summary?: string;
+  error?: string;
+  checkedAt: number;
 };
 
 const jobSourceValidator = v.union(
@@ -112,11 +143,41 @@ const llmAnalysisValidator = v.object({
   checkedAt: v.number(),
 });
 
+const skillSpectorIssueValidator = v.object({
+  issueId: v.string(),
+  category: v.optional(v.string()),
+  pattern: v.optional(v.string()),
+  severity: v.string(),
+  confidence: v.optional(v.number()),
+  file: v.optional(v.string()),
+  startLine: v.optional(v.number()),
+  endLine: v.optional(v.number()),
+  explanation: v.string(),
+  remediation: v.optional(v.string()),
+  finding: v.optional(v.string()),
+  codeSnippet: v.optional(v.string()),
+});
+
+const skillSpectorAnalysisValidator = v.object({
+  status: v.string(),
+  score: v.optional(v.number()),
+  severity: v.optional(v.string()),
+  recommendation: v.optional(v.string()),
+  issueCount: v.number(),
+  // Scanner/action boundaries cap this array before storage; Convex validators cannot express max length.
+  issues: v.array(skillSpectorIssueValidator),
+  scannerVersion: v.optional(v.string()),
+  summary: v.optional(v.string()),
+  error: v.optional(v.string()),
+  checkedAt: v.number(),
+});
+
 const internalRefs = internal as unknown as {
   packages: {
     getPackageByIdInternal: unknown;
     getReleaseByIdInternal: unknown;
     updateReleaseLlmAnalysisInternal: unknown;
+    updateReleaseSkillSpectorAnalysisInternal: unknown;
   };
   securityScan: {
     claimQueuedJobsInternal: unknown;
@@ -130,6 +191,7 @@ const internalRefs = internal as unknown as {
     getSkillByIdInternal: unknown;
     getVersionByIdInternal: unknown;
     updateVersionLlmAnalysisInternal: unknown;
+    updateVersionSkillSpectorAnalysisInternal: unknown;
   };
 };
 
@@ -171,6 +233,76 @@ function publicWorkerErrorDetail(error: string) {
     )
     .replace(/\b[A-Za-z0-9_+/=-]{64,}\b/g, "[redacted-secret]")
     .slice(0, 500);
+}
+
+function truncateSkillSpectorStorageText(
+  value: string | undefined,
+  maxChars = MAX_STORED_SKILLSPECTOR_TEXT_CHARS,
+) {
+  if (value === undefined) return undefined;
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n...[truncated ${value.length - maxChars} chars]`;
+}
+
+function capSkillSpectorIssueForStorage(
+  issue: SkillSpectorIssueForStorage,
+): SkillSpectorIssueForStorage {
+  return {
+    issueId:
+      truncateSkillSpectorStorageText(issue.issueId, MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS) ??
+      "skillspector-issue",
+    category: truncateSkillSpectorStorageText(
+      issue.category,
+      MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS,
+    ),
+    pattern: truncateSkillSpectorStorageText(
+      issue.pattern,
+      MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS,
+    ),
+    severity:
+      truncateSkillSpectorStorageText(issue.severity, MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS) ??
+      "UNKNOWN",
+    confidence: issue.confidence,
+    file: truncateSkillSpectorStorageText(issue.file, MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS),
+    startLine: issue.startLine,
+    endLine: issue.endLine,
+    explanation:
+      truncateSkillSpectorStorageText(issue.explanation) ??
+      "SkillSpector reported this issue without additional explanation.",
+    remediation: truncateSkillSpectorStorageText(issue.remediation),
+    finding: truncateSkillSpectorStorageText(issue.finding),
+    codeSnippet: truncateSkillSpectorStorageText(issue.codeSnippet),
+  };
+}
+
+function capSkillSpectorAnalysisForStorage(
+  analysis: SkillSpectorAnalysisForStorage,
+): SkillSpectorAnalysisForStorage {
+  return {
+    status:
+      truncateSkillSpectorStorageText(analysis.status, MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS) ??
+      "error",
+    score: analysis.score,
+    severity: truncateSkillSpectorStorageText(
+      analysis.severity,
+      MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS,
+    ),
+    recommendation: truncateSkillSpectorStorageText(
+      analysis.recommendation,
+      MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS,
+    ),
+    issueCount: Math.max(analysis.issueCount, analysis.issues.length),
+    issues: analysis.issues
+      .slice(0, MAX_STORED_SKILLSPECTOR_ISSUES)
+      .map(capSkillSpectorIssueForStorage),
+    scannerVersion: truncateSkillSpectorStorageText(
+      analysis.scannerVersion,
+      MAX_STORED_SKILLSPECTOR_SHORT_TEXT_CHARS,
+    ),
+    summary: truncateSkillSpectorStorageText(analysis.summary),
+    error: truncateSkillSpectorStorageText(analysis.error),
+    checkedAt: analysis.checkedAt,
+  };
 }
 
 function buildWorkerFailureLlmAnalysis(error: string) {
@@ -751,6 +883,7 @@ export const completeCodexScanJob = action({
     jobId: v.id("securityScanJobs"),
     leaseToken: v.string(),
     llmAnalysis: llmAnalysisValidator,
+    skillSpectorAnalysis: v.optional(skillSpectorAnalysisValidator),
     runId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -766,11 +899,23 @@ export const completeCodexScanJob = action({
     if (target.job.leaseToken !== args.leaseToken) throw new ConvexError("Lease mismatch");
 
     if (target.job.targetKind === "skillVersion" && target.version) {
+      if (args.skillSpectorAnalysis) {
+        await runMutationRef(ctx, internalRefs.skills.updateVersionSkillSpectorAnalysisInternal, {
+          versionId: target.version._id,
+          skillSpectorAnalysis: capSkillSpectorAnalysisForStorage(args.skillSpectorAnalysis),
+        });
+      }
       await runMutationRef(ctx, internalRefs.skills.updateVersionLlmAnalysisInternal, {
         versionId: target.version._id,
         llmAnalysis: args.llmAnalysis,
       });
     } else if (target.job.targetKind === "packageRelease" && target.release) {
+      if (args.skillSpectorAnalysis) {
+        await runMutationRef(ctx, internalRefs.packages.updateReleaseSkillSpectorAnalysisInternal, {
+          releaseId: target.release._id,
+          skillSpectorAnalysis: capSkillSpectorAnalysisForStorage(args.skillSpectorAnalysis),
+        });
+      }
       await runMutationRef(ctx, internalRefs.packages.updateReleaseLlmAnalysisInternal, {
         releaseId: target.release._id,
         llmAnalysis: args.llmAnalysis,
