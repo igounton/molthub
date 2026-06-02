@@ -289,6 +289,119 @@ describe("requireGitHubAccountAge", () => {
       }),
     );
   });
+
+  it("omits Authorization header when GITHUB_TOKEN is blank", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-02-02T12:00:00Z");
+    vi.setSystemTime(now);
+
+    vi.stubEnv("GITHUB_TOKEN", "   ");
+
+    const runQuery = vi
+      .fn()
+      .mockResolvedValueOnce({
+        _id: "users:1",
+        githubCreatedAt: undefined,
+      })
+      .mockResolvedValueOnce("12345");
+    const runMutation = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        created_at: "2020-01-01T00:00:00Z",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requireGitHubAccountAge({ runQuery, runMutation } as never, "users:1" as never);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/user/12345",
+      expect.objectContaining({
+        headers: { "User-Agent": "clawhub" },
+      }),
+    );
+  });
+
+  it("retries without Authorization when GITHUB_TOKEN is rejected", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-02-02T12:00:00Z");
+    vi.setSystemTime(now);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.stubEnv("GITHUB_TOKEN", "ghp_expired");
+
+    const runQuery = vi
+      .fn()
+      .mockResolvedValueOnce({
+        _id: "users:1",
+        githubCreatedAt: undefined,
+      })
+      .mockResolvedValueOnce("12345");
+    const runMutation = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          created_at: "2020-01-01T00:00:00Z",
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requireGitHubAccountAge({ runQuery, runMutation } as never, "users:1" as never);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.github.com/user/12345",
+      expect.objectContaining({
+        headers: {
+          "User-Agent": "clawhub",
+          Authorization: "Bearer ghp_expired",
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.github.com/user/12345",
+      expect.objectContaining({
+        headers: { "User-Agent": "clawhub" },
+      }),
+    );
+    expect(runMutation).toHaveBeenCalledWith(internal.users.setGitHubCreatedAtInternal, {
+      userId: "users:1",
+      githubCreatedAt: Date.parse("2020-01-01T00:00:00Z"),
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[githubAccount] GITHUB_TOKEN was rejected; retrying lookup without auth",
+    );
+  });
+
+  it("does not retry unauthenticated 401 responses", async () => {
+    const runQuery = vi
+      .fn()
+      .mockResolvedValueOnce({
+        _id: "users:1",
+        githubCreatedAt: undefined,
+      })
+      .mockResolvedValueOnce("12345");
+    const runMutation = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      requireGitHubAccountAge({ runQuery, runMutation } as never, "users:1" as never),
+    ).rejects.toThrow(/GitHub account lookup failed/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/user/12345",
+      expect.objectContaining({
+        headers: { "User-Agent": "clawhub" },
+      }),
+    );
+  });
 });
 
 describe("syncGitHubProfile", () => {

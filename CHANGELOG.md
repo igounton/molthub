@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Auth/Ops: keep GitHub account-age lookups on immutable numeric IDs, retry without auth when a configured GitHub token is rejected, and add an operator backfill for missing cached account ages.
 - API/CLI: report Skill Card verification with flattened skill/version metadata, ClawScan verdict fields at `security.*`, and supporting scanner evidence under `security.signals`.
 
 ## 0.18.0 - 2026-05-25

@@ -299,6 +299,9 @@ See also: [acceptable-usage.md](./acceptable-usage.md) for the marketplace polic
 - To reduce rate-limit failures, set `GITHUB_TOKEN` in Convex env for authenticated
   GitHub API requests. The same token is used for trusted-publisher repository
   identity lookups.
+- If a configured `GITHUB_TOKEN` is rejected with `401`, retry the account-age
+  lookup without auth before failing. Never fall back to mutable GitHub usernames
+  for this gate; use the operator backfill to cache missing ages for existing users.
 
 ## Empty-skill cleanup (backfill)
 
