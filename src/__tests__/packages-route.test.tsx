@@ -74,6 +74,9 @@ vi.mock("convex/react", () => ({
 
 vi.mock("../../convex/_generated/api", () => ({
   api: {
+    catalogTopics: {
+      listTopByCategory: "catalogTopics:listTopByCategory",
+    },
     packages: {
       countPublicPlugins: "packages:countPublicPlugins",
     },
@@ -666,7 +669,7 @@ describe("plugins route", () => {
     expect(screen.queryByText("321")).toBeNull();
   });
 
-  it("keeps an active topic facet visible when it has no results", async () => {
+  it("does not render an active topic in the sidebar when it has no results", async () => {
     searchMock = { topic: "postgres" };
     loaderDataMock = {
       items: [],
@@ -679,10 +682,48 @@ describe("plugins route", () => {
 
     render(<Component />);
 
-    expect(screen.getByRole("radio", { name: "postgres" }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("radio", { name: "All topics" })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "postgres" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "All topics" })).toBeNull();
+  });
+
+  it("shows category topic chips and filters plugins by the selected topic", async () => {
+    searchMock = { category: "runtime" };
+    loaderDataMock = {
+      items: [],
+      nextCursor: null,
+      rateLimited: false,
+      retryAfterSeconds: null,
+    };
+    convexReactMocks.useQuery.mockImplementation((_reference, args) => {
+      if (
+        args &&
+        typeof args === "object" &&
+        "kind" in args &&
+        (args as { kind?: string }).kind === "plugin"
+      ) {
+        return ["docker", "typescript", "github", "debugging", "coding"];
+      }
+      return null;
+    });
+    const route = await loadRoute();
+    const Component = route.__config.component as ComponentType;
+
+    render(<Component />);
+
+    expect(screen.getAllByRole("button", { name: /^#/ })).toHaveLength(5);
+    fireEvent.click(screen.getByRole("button", { name: "#docker" }));
+
+    const lastCall = navigateMock.mock.calls.at(-1)?.[0] as {
+      search: (prev: Record<string, unknown>) => Record<string, unknown>;
+      replace?: boolean;
+    };
+    expect(lastCall.search({ category: "runtime" })).toEqual({
+      category: "runtime",
+      cursor: undefined,
+      family: undefined,
+      topic: "docker",
+    });
+    expect(lastCall.replace).toBe(true);
   });
 
   it("renders a label-only title without positive count data and switches to grid view", async () => {
