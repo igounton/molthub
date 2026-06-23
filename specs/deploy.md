@@ -171,18 +171,18 @@ Keep production rewrites and discovery metadata aligned before release.
 
 ### Hosted catalog feed
 
-Refresh the OpenClaw hosted plugin feed after the production Convex deployment
-has the catalog projection:
+Refresh the OpenClaw hosted plugin and skill feeds after the production Convex
+deployment has the catalog projections:
 
 ```bash
 gh workflow run publish-catalog-feed.yml --repo openclaw/clawhub --ref main
 ```
 
-The workflow stores the current feed snapshot in Convex and serves it through
-`/v1/feeds/plugins` with public edge-cache validators. The unversioned
-`/feeds/plugins` path redirects to the versioned route. Attach
-`registry.openclaw.ai` to the same Vercel project before configuring OpenClaw's
-default feed URL.
+The workflow stores both current feed snapshots in Convex and serves them
+through `/v1/feeds/plugins` and `/v1/feeds/skills` with public edge-cache
+validators. The unversioned `/feeds/plugins` and `/feeds/skills` paths redirect
+to their versioned routes. Attach `registry.openclaw.ai` to the same Vercel
+project before configuring OpenClaw's default feed URLs.
 
 ## 5) Post-deploy checks
 

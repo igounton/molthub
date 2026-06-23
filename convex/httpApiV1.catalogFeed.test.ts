@@ -35,7 +35,9 @@ describe("catalogFeedV1Handler", () => {
     expect(response.headers.get("last-modified")).toBe("Tue, 23 Jun 2026 00:00:00 GMT");
     expect(response.headers.get("cache-control")).toContain("s-maxage=300");
     expect(response.headers.get("surrogate-control")).toContain("stale-while-revalidate=86400");
-    expect(ctx.runQuery).toHaveBeenCalledWith(internal.catalogFeed.getLatestPublication, {});
+    expect(ctx.runQuery).toHaveBeenCalledWith(internal.catalogFeed.getLatestPublication, {
+      feedId: "clawhub-official",
+    });
   });
 
   it("returns 304 for a matching validator", async () => {

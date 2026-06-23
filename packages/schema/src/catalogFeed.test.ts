@@ -3,6 +3,7 @@ import {
   CATALOG_FEED_ID,
   CATALOG_FEED_SCHEMA_VERSION,
   CATALOG_FEED_SOURCE_REF,
+  CATALOG_SKILLS_FEED_ID,
   parseCatalogFeed,
   serializeCatalogFeed,
   type CatalogFeed,
@@ -114,5 +115,33 @@ describe("catalog feed schema", () => {
         } as never),
       ),
     ).toThrow();
+  });
+
+  it("accepts skill entries in a skills feed", () => {
+    const feed = makeFeed({
+      id: CATALOG_SKILLS_FEED_ID,
+      entries: [
+        {
+          type: "skill",
+          id: "@openclaw/demo",
+          title: "Demo",
+          version: "1.0.0",
+          state: "available",
+          publisher: { id: "openclaw", trust: "official" },
+          install: {
+            candidates: [
+              {
+                sourceRef: CATALOG_FEED_SOURCE_REF,
+                package: "@openclaw/demo",
+                version: "1.0.0",
+                integrity: "sha256:abc",
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(parseCatalogFeed(feed).entries[0]?.type).toBe("skill");
   });
 });

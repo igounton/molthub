@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { listOfficialEntries } from "./catalogFeed";
+import { listOfficialEntries, listOfficialSkillEntries } from "./catalogFeed";
 
 vi.mock("./lib/publishers", () => ({
   getOwnerPublisher: vi.fn().mockResolvedValue({ handle: "openclaw" }),
@@ -17,6 +17,9 @@ const listOfficialEntriesHandler = (
     { family: "code-plugin" | "bundle-plugin" },
     unknown[]
   >
+)._handler;
+const listOfficialSkillEntriesHandler = (
+  listOfficialSkillEntries as unknown as WrappedHandler<{ cursor: string | null }, unknown>
 )._handler;
 
 function makePackage(overrides: Record<string, unknown> = {}) {
@@ -49,7 +52,33 @@ function makeRelease(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeCtx(packages: unknown[], releases: Record<string, unknown>) {
+function makeSkill(overrides: Record<string, unknown> = {}) {
+  return {
+    _id: "skills:1",
+    slug: "demo",
+    displayName: "Demo skill",
+    ownerUserId: "users:1",
+    ownerPublisherId: "publishers:1",
+    latestVersionId: "skillVersions:1",
+    softDeletedAt: undefined,
+    moderationStatus: "active",
+    ...overrides,
+  };
+}
+
+function makeSkillVersion(overrides: Record<string, unknown> = {}) {
+  return {
+    _id: "skillVersions:1",
+    skillId: "skills:1",
+    version: "1.2.3",
+    softDeletedAt: undefined,
+    files: [{ path: "SKILL.md", size: 1, storageId: "storage:1", sha256: "file-hash" }],
+    sha256hash: "skill-hash",
+    ...overrides,
+  };
+}
+
+function makeCtx(packages: unknown[], records: Record<string, unknown>) {
   return {
     db: {
       query: vi.fn(() => {
@@ -71,7 +100,7 @@ function makeCtx(packages: unknown[], releases: Record<string, unknown>) {
           }),
         };
       }),
-      get: vi.fn(async (id: string) => releases[id] ?? null),
+      get: vi.fn(async (id: string) => records[id] ?? null),
     },
   };
 }
@@ -155,5 +184,77 @@ describe("catalog feed projection", () => {
     );
 
     expect(result).toEqual([]);
+  });
+
+  it("projects only published skills from verified organization publishers", async () => {
+    const result = (await listOfficialSkillEntriesHandler(
+      makeCtx([makeSkill()], {
+        "publishers:1": { _id: "publishers:1", kind: "org", handle: "openclaw" },
+        "skillVersions:1": makeSkillVersion(),
+      }),
+      { cursor: null },
+    )) as { entries: unknown[]; isDone: boolean };
+
+    expect(result).toMatchObject({
+      entries: [
+        {
+          type: "skill",
+          id: "@openclaw/demo",
+          title: "Demo skill",
+          version: "1.2.3",
+          state: "available",
+          publisher: { id: "openclaw", trust: "official" },
+          install: {
+            candidates: [
+              {
+                sourceRef: "public-clawhub",
+                package: "@openclaw/demo",
+                version: "1.2.3",
+                integrity: "sha256:skill-hash",
+              },
+            ],
+          },
+        },
+      ],
+      isDone: true,
+    });
+  });
+
+  it("excludes a latest version blocked by the download safety gate", async () => {
+    const result = (await listOfficialSkillEntriesHandler(
+      makeCtx([makeSkill()], {
+        "publishers:1": { _id: "publishers:1", kind: "org", handle: "openclaw" },
+        "skillVersions:1": makeSkillVersion({
+          llmAnalysis: { status: "complete", verdict: "malicious" },
+        }),
+      }),
+      { cursor: null },
+    )) as { entries: unknown[]; isDone: boolean };
+
+    expect(result.entries).toEqual([]);
+  });
+
+  it("excludes personal, unverified, unpublished, and un-hashed skills", async () => {
+    const skills = [
+      makeSkill({ _id: "skills:user", ownerPublisherId: "publishers:user" }),
+      makeSkill({ _id: "skills:unverified", ownerPublisherId: "publishers:unverified" }),
+      makeSkill({ _id: "skills:unpublished", latestVersionId: undefined }),
+      makeSkill({ _id: "skills:no-hash", latestVersionId: "skillVersions:no-hash" }),
+    ];
+    vi.mocked((await import("./lib/officialPublishers")).isOfficialPublisher).mockImplementation(
+      async (_ctx, publisher) => publisher?._id === "publishers:1",
+    );
+
+    const result = (await listOfficialSkillEntriesHandler(
+      makeCtx(skills, {
+        "publishers:user": { _id: "publishers:user", kind: "user", handle: "alice" },
+        "publishers:unverified": { _id: "publishers:unverified", kind: "org", handle: "vendor" },
+        "skillVersions:1": makeSkillVersion(),
+        "skillVersions:no-hash": makeSkillVersion({ sha256hash: undefined }),
+      }),
+      { cursor: null },
+    )) as { entries: unknown[]; isDone: boolean };
+
+    expect(result.entries).toEqual([]);
   });
 });

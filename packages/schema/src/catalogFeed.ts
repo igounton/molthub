@@ -17,9 +17,8 @@ export const CatalogFeedInstallCandidateSchema = type({
 });
 export type CatalogFeedInstallCandidate = (typeof CatalogFeedInstallCandidateSchema)[inferred];
 
-export const CatalogFeedEntrySchema = type({
+const CatalogFeedEntryBaseSchema = {
   "+": "reject",
-  type: '"plugin"',
   id: "string",
   title: "string",
   version: "string",
@@ -33,7 +32,23 @@ export const CatalogFeedEntrySchema = type({
     "+": "reject",
     candidates: CatalogFeedInstallCandidateSchema.array(),
   },
+} as const;
+
+export const CatalogFeedPluginEntrySchema = type({
+  ...CatalogFeedEntryBaseSchema,
+  type: '"plugin"',
 });
+export type CatalogFeedPluginEntry = (typeof CatalogFeedPluginEntrySchema)[inferred];
+
+export const CatalogFeedSkillEntrySchema = type({
+  ...CatalogFeedEntryBaseSchema,
+  type: '"skill"',
+});
+export type CatalogFeedSkillEntry = (typeof CatalogFeedSkillEntrySchema)[inferred];
+
+export const CatalogFeedEntrySchema = type(
+  CatalogFeedPluginEntrySchema.or(CatalogFeedSkillEntrySchema),
+);
 export type CatalogFeedEntry = (typeof CatalogFeedEntrySchema)[inferred];
 
 export const CatalogFeedSchema = type({
@@ -51,6 +66,9 @@ export type CatalogFeed = (typeof CatalogFeedSchema)[inferred];
 export const CATALOG_FEED_SCHEMA_VERSION = 1;
 export const CATALOG_FEED_ID = "clawhub-official";
 export const CATALOG_FEED_SOURCE_REF = "public-clawhub";
+export const CATALOG_SKILLS_FEED_ID = "clawhub-official-skills";
+export const CATALOG_SKILLS_FEED_DESCRIPTION =
+  "Skills published by verified OpenClaw organizations on ClawHub.";
 
 export function parseCatalogFeed(value: unknown): CatalogFeed {
   const feed = CatalogFeedSchema.assert(value);

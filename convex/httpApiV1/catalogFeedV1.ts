@@ -1,3 +1,4 @@
+import { CATALOG_FEED_ID, CATALOG_SKILLS_FEED_ID } from "clawhub-schema";
 import { internal } from "../_generated/api";
 import type { ActionCtx } from "../_generated/server";
 import { corsHeaders, mergeHeaders } from "../lib/httpHeaders";
@@ -23,8 +24,12 @@ function matchesLastModified(request: Request, publishedAt: number) {
   return Math.floor(publishedAt / 1000) * 1000 <= since;
 }
 
-export async function catalogFeedV1Handler(ctx: ActionCtx, request: Request) {
-  const publication = await ctx.runQuery(internal.catalogFeed.getLatestPublication, {});
+export async function catalogFeedV1Handler(
+  ctx: ActionCtx,
+  request: Request,
+  feedId: typeof CATALOG_FEED_ID | typeof CATALOG_SKILLS_FEED_ID = CATALOG_FEED_ID,
+) {
+  const publication = await ctx.runQuery(internal.catalogFeed.getLatestPublication, { feedId });
   if (!publication) {
     return new Response("Catalog feed is not published", {
       status: 503,
@@ -61,4 +66,8 @@ export async function catalogFeedV1Handler(ctx: ActionCtx, request: Request) {
     return new Response(null, { status: 304, headers });
   }
   return new Response(publication.payload, { status: 200, headers });
+}
+
+export async function catalogSkillsFeedV1Handler(ctx: ActionCtx, request: Request) {
+  return await catalogFeedV1Handler(ctx, request, CATALOG_SKILLS_FEED_ID);
 }
