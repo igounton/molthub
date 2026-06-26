@@ -80,10 +80,11 @@ jobs:
           auth_rejected=false
 
           if [ -n "${BARNACLE_TOKEN:-}" ]; then
-            if dispatch_with_token "Barnacle GitHub App" "${BARNACLE_TOKEN}"; then
+            status=0
+            dispatch_with_token "Barnacle GitHub App" "${BARNACLE_TOKEN}" || status="$?"
+            if [ "${status}" = "0" ]; then
               exit 0
             fi
-            status="$?"
             if [ "${status}" != "2" ]; then
               exit "${status}"
             fi
